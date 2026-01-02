@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CRT GOMOKU // 五子棋 FINAL+</title>
+    <style>
+        :root {
+            --primary: #33ff33; /* 玩家颜色/主色调 */
+            --player-glow: #ccffcc;
+            --ai-color: #ff3333; /* AI颜色 */
+            --ai-glow: #ffcccc;
+            --bg-color: #050505;
+            --screen-bg: #050505;
+            --grid-color: #0f3f0f;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: radial-gradient(circle at center, #1a1a2e 0%, #0f0f1e 40%, #000000 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        body::before {
+            content: "";
+            position: absolute;
+            width: 120%;
+            height: 120%;
+            background: radial-gradient(circle at center, rgba(51, 255, 51, 0.05) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .monitor-casing {
+            position: relative;
+            z-index: 1;
+            width: 860px;
+            height: 660px;
+            background: linear-gradient(135deg, #3d3d3d 0%, #2b2b2b 50%, #1a1a1a 100%);
+            border-radius: 36px;
+            padding: 20px;
+            box-shadow: 
+                inset 0 2px 3px rgba(255,255,255,0.3),
+                inset 0 -2px 3px rgba(0,0,0,0.5),
+                0 0 0 8px #1a1a1a,
+                0 20px 40px rgba(0,0,0,0.6),
+                0 0 100px rgba(0,0,0,0.8);
+        }
+
+        .screen-bezel {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border-radius: 24px;
+            background: #000;
+            overflow: hidden;
+            box-shadow: 
+                inset 0 0 0 2px #000,
+                inset 0 0 10px rgba(0,0,0,1);
+        }
+
+        .screen {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background-color: var(--screen-bg);
+            border-radius: 24px;
+            box-shadow: 
+                inset 0 0 15px rgba(0,0,0,0.8),
+                inset 0 0 80px rgba(0,0,0,0.6);
+            /* 游戏中隐藏系统鼠标，完全由 Canvas 绘制光标 */
+            cursor: none; 
+        }
+
+        .screen::before {
+            content: " ";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 101; 
+            pointer-events: none;
+            border-radius: 24px;
+            background: 
+                linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 15%),
+                radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.05), transparent 60%),
+                linear-gradient(0deg, rgba(255,255,255,0.02) 0%, transparent 10%);
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+        }
+
+        .screen::after {
+            content: " ";
+            position: absolute;
+            top: 5%; right: 5%; width: 25%; height: 15%;
+            background: radial-gradient(ellipse at center, rgba(255,255,255,0.1) 0%, transparent 70%);
+            transform: rotate(-15deg);
+            filter: blur(20px);
+            z-index: 102;
+            pointer-events: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            /* 默认 CRT 模式：带模糊和高对比度 */
+            filter: blur(0.5px) contrast(1.2) brightness(1.1);
+            transition: filter 0.4s ease; /* 平滑过渡 */
+        }
+
+        /* [新增] 无扫描线模式下的 Canvas 样式：清晰锐利 */
+        .screen.no-scanlines canvas {
+            filter: blur(0px) contrast(1.05) brightness(1.0);
+        }
+
+        .crt-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 100;
+            border-radius: 24px;
+            background: 
+                linear-gradient(90deg, rgba(255,0,0,0.04), rgba(0,255,0,0.02), rgba(0,0,255,0.04)),
+                linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.4) 50%);
+            background-size: 3px 100%, 100% 4px;
+            animation: scanline 10s linear infinite;
+            opacity: 1;
+            transition: opacity 0.4s ease;
+        }
+        
+        .crt-overlay.hidden {
+            opacity: 0;
+            display: block !important; /* 覆盖默认 hidden，用 opacity 做动画 */
+        }
+
+        @keyframes scanline {
+            0% { background-position: 0 0; }
+            100% { background-position: 0 100%; }
+        }
+
+        .ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: var(--primary);
+            pointer-events: none;
+        }
+
+        /* 暂停菜单背景遮罩 */
+        #pauseMenu {
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(4px);
+        }
+
+        .hud-panel {
+            position: absolute;
+            top: 30px; 
+            left: 40px;
+            right: 40px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--primary);
+            text-shadow: 0 0 10px var(--primary);
+            filter: blur(0.5px);
+            z-index: 50;
+            opacity: 1;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+
+        /* [新增] 无扫描线模式下的 HUD 样式：更清晰 */
+        .screen.no-scanlines .hud-panel {
+            filter: none;
+            text-shadow: 0 0 5px var(--primary);
+        }
+
+        .crt-text {
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 8px;
+            color: var(--primary);
+            text-shadow: 
+                -3px 0 rgba(255,0,0,0.6), 
+                 3px 0 rgba(0,0,255,0.6), 
+                 0 0 20px var(--primary);
+            filter: blur(0.5px);
+            animation: textFlicker 0.1s infinite alternate;
+            transition: all 0.4s ease;
+        }
+
+        /* [新增] 无扫描线模式下的文字：减少抖动和发光 */
+        .screen.no-scanlines .crt-text {
+            filter: none;
+            animation: none; /* 停止抖动 */
+            text-shadow: 0 0 10px var(--primary);
+        }
+
+        .crt-title {
+            font-size: 80px;
+            margin-bottom: 20px;
+            line-height: 1;
+        }
+
+        .status-box {
+            font-size: 20px;
+            padding: 12px 24px;
+            margin: 10px 0;
+            border: 2px solid var(--primary);
+            background: rgba(0, 20, 0, 0.9);
+            box-shadow: 0 0 15px var(--primary), inset 0 0 15px rgba(51, 255, 51, 0.3);
+            text-shadow: 0 0 8px var(--primary);
+            cursor: pointer;
+            pointer-events: auto;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        /* [新增] 无扫描线模式下的按钮：减少辉光 */
+        .screen.no-scanlines .status-box {
+            box-shadow: 0 0 5px var(--primary), inset 0 0 5px rgba(51, 255, 51, 0.1);
+        }
+
+        .status-box:hover {
+            background: rgba(0, 50, 0, 0.9);
+            transform: scale(1.05);
+        }
+
+        .status-box.danger {
+            border-color: var(--danger);
+            color: var(--danger);
+            background: rgba(30, 0, 0, 0.9);
+            box-shadow: 0 0 20px var(--danger);
+            text-shadow: 0 0 10px var(--danger);
+        }
+        
+        .status-box.secondary {
+             border-color: #55aa55;
+             color: #55aa55;
+             background: rgba(0, 15, 0, 0.8);
+             box-shadow: 0 0 10px #55aa55;
+        }
+
+        .menu-options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 30px;
+            align-items: center;
+        }
+
+        .hidden { display: none !important; }
+        .invisible { opacity: 0 !important; }
+
+        @keyframes textFlicker {
+            0% { opacity: 0.95; transform: skewX(0.5deg); }
+            100% { opacity: 1; transform: skewX(0deg); }
+        }
+
+        .turn-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--primary);
+            box-shadow: 0 0 10px var(--primary);
+            margin-right: 10px;
+            animation: pulse 1s infinite;
+        }
+        
+        .turn-indicator.ai-turn {
+            background: var(--ai-color);
+            box-shadow: 0 0 10px var(--ai-color);
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.5; transform: scale(0.9); }
+            50% { opacity: 1; transform: scale(1.1); }
+            100% { opacity: 0.5; transform: scale(0.9); }
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="monitor-casing">
+        <div class="screen-bezel">
+            <div class="screen" id="screenContainer">
+                <div class="crt-overlay" id="crtOverlay"></div>
+                
+                <div id="hudPanel" class="hud-panel invisible">
+                    <div>
+                        <span id="turnDot" class="turn-indicator"></span>
+                        <span id="turnText">PLAYER TURN</span>
+                    </div>
+                    <div>MODE: <span id="difficultyText">NORMAL</span></div>
+                </div>
+
+                <canvas id="gameCanvas"></canvas>
+
+                <!-- 主菜单 -->
+                <div id="startScreen" class="ui-layer">
+                    <h1 class="crt-text crt-title">GOMOKU</h1>
+                    <div style="color:var(--primary); margin-bottom: 20px; font-size: 18px; text-shadow: 0 0 5px var(--primary);">SELECT DIFFICULTY</div>
+                    
+                    <div class="menu-options">
+                        <div class="status-box" onclick="startGame('easy')">[1] EASY</div>
+                        <div class="status-box" onclick="startGame('normal')">[2] NORMAL</div>
+                        <div class="status-box" onclick="startGame('hard')">[3] HARD</div>
+                        <div class="status-box secondary" onclick="toggleScanlines()" style="margin-top: 15px; font-size: 16px;">
+                            [S] SCANLINES: <span class="scanline-status-text">ON</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 暂停菜单 -->
+                <div id="pauseMenu" class="ui-layer hidden">
+                    <h1 class="crt-text crt-title">PAUSED</h1>
+                    <div class="menu-options">
+                        <div class="status-box" onclick="togglePause()">[ESC] RESUME</div>
+                        <div class="status-box secondary" onclick="toggleScanlines()">
+                            [S] SCANLINES: <span class="scanline-status-text">ON</span>
+                        </div>
+                        <div class="status-box danger" onclick="backToMenu()">[Q] QUIT TO MENU</div>
+                    </div>
+                </div>
+
+                <!-- 结束界面 -->
+                <div id="gameOverScreen" class="ui-layer hidden">
+                    <h1 id="winnerText" class="crt-text crt-title" style="font-size: 70px;">YOU WIN</h1>
+                    <div class="status-box" onclick="backToMenu()">PRESS [SPACE] TO MENU</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const screenContainer = document.getElementById('screenContainer');
+    const crtOverlay = document.getElementById('crtOverlay');
+    
+    // UI Elements
+    const startScreen = document.getElementById('startScreen');
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const pauseMenu = document.getElementById('pauseMenu');
+    const hudPanel = document.getElementById('hudPanel');
+    const turnText = document.getElementById('turnText');
+    const turnDot = document.getElementById('turnDot');
+    const difficultyText = document.getElementById('difficultyText');
+    const winnerText = document.getElementById('winnerText');
+    const scanlineStatusTexts = document.querySelectorAll('.scanline-status-text');
+
+    // --- 配置 ---
+    const CANVAS_WIDTH = 840;
+    const CANVAS_HEIGHT = 640;
+    const GRID_SIZE = 30; 
+    const BOARD_SIZE = 19; 
+    const BOARD_OFFSET_X = (CANVAS_WIDTH - (BOARD_SIZE - 1) * GRID_SIZE) / 2;
+    const BOARD_OFFSET_Y = (CANVAS_HEIGHT - (BOARD_SIZE - 1) * GRID_SIZE) / 2;
+    
+    // 颜色
+    const COLOR_GRID = '#154515';
+    const COLOR_P1 = '#33ff33'; // 玩家
+    const COLOR_P2 = '#ff3333'; // AI
+
+    // 缓存 Canvas
+    const bgCache = document.createElement('canvas'); 
+    const p1Cache = document.createElement('canvas'); 
+    const p2Cache = document.createElement('canvas'); 
+
+    // 游戏状态
+    let board = [];
+    let isPlaying = false;
+    let isPaused = false;
+    let isPlayerTurn = true;
+    let difficulty = 'normal';
+    let gameOver = false;
+    let scanlinesOn = true;
+    
+    // 鼠标位置
+    let mouseGridX = -1;
+    let mouseGridY = -1;
+    
+    // 实时平滑鼠标坐标
+    let rawMouseX = -1000;
+    let rawMouseY = -1000;
+
+    function resizeCanvas() {
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+        bgCache.width = CANVAS_WIDTH;
+        bgCache.height = CANVAS_HEIGHT;
+        cacheAssets();
+    }
+
+    // --- 预渲染资源 ---
+    function cacheAssets() {
+        const bgCtx = bgCache.getContext('2d');
+        bgCtx.fillStyle = '#050f05'; 
+        bgCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        bgCtx.lineWidth = 1;
+        bgCtx.beginPath();
+        for (let i = 0; i < BOARD_SIZE; i++) {
+            bgCtx.strokeStyle = COLOR_GRID;
+            bgCtx.moveTo(BOARD_OFFSET_X, BOARD_OFFSET_Y + i * GRID_SIZE);
+            bgCtx.lineTo(BOARD_OFFSET_X + (BOARD_SIZE - 1) * GRID_SIZE, BOARD_OFFSET_Y + i * GRID_SIZE);
+            
+            bgCtx.moveTo(BOARD_OFFSET_X + i * GRID_SIZE, BOARD_OFFSET_Y);
+            bgCtx.lineTo(BOARD_OFFSET_X + i * GRID_SIZE, BOARD_OFFSET_Y + (BOARD_SIZE - 1) * GRID_SIZE);
+        }
+        bgCtx.stroke();
+
+        const starPoints = [3, 9, 15];
+        bgCtx.fillStyle = COLOR_GRID;
+        starPoints.forEach(sy => {
+            starPoints.forEach(sx => {
+                const cx = BOARD_OFFSET_X + sx * GRID_SIZE;
+                const cy = BOARD_OFFSET_Y + sy * GRID_SIZE;
+                bgCtx.beginPath();
+                bgCtx.arc(cx, cy, 3, 0, Math.PI * 2);
+                bgCtx.fill();
+            });
+        });
+
+        bgCtx.strokeStyle = '#1f5f1f';
+        bgCtx.lineWidth = 2;
+        bgCtx.strokeRect(BOARD_OFFSET_X - 10, BOARD_OFFSET_Y - 10, (BOARD_SIZE - 1) * GRID_SIZE + 20, (BOARD_SIZE - 1) * GRID_SIZE + 20);
+
+        const pieceSize = GRID_SIZE * 2;
+        const radius = GRID_SIZE * 0.44; 
+        const center = pieceSize / 2;
+
+        [p1Cache, p2Cache].forEach((cache, index) => {
+            cache.width = pieceSize;
+            cache.height = pieceSize;
+            const pCtx = cache.getContext('2d');
+            
+            const isP1 = index === 0;
+            const mainColor = isP1 ? '#33ff33' : '#ff3333';
+            const lightColor = isP1 ? '#aaffaa' : '#ffaaaa';
+            const darkColor = isP1 ? '#006600' : '#660000';
+            
+            // 外部辉光
+            pCtx.shadowBlur = 15;
+            pCtx.shadowColor = mainColor;
+            
+            // 棋子主体
+            const gradient = pCtx.createRadialGradient(
+                center - radius * 0.3, center - radius * 0.3, radius * 0.1, 
+                center, center, radius 
+            );
+            gradient.addColorStop(0, lightColor);
+            gradient.addColorStop(0.3, mainColor);
+            gradient.addColorStop(1, darkColor);
+            
+            pCtx.fillStyle = gradient;
+            pCtx.beginPath();
+            pCtx.arc(center, center, radius, 0, Math.PI * 2);
+            pCtx.fill();
+
+            // 高光
+            pCtx.shadowBlur = 0;
+            pCtx.fillStyle = 'rgba(255,255,255,0.85)';
+            pCtx.beginPath();
+            pCtx.ellipse(
+                center - radius * 0.3, 
+                center - radius * 0.35, 
+                radius * 0.25, 
+                radius * 0.15, 
+                Math.PI / 4, 
+                0, Math.PI * 2
+            );
+            pCtx.fill();
+            
+            pCtx.fillStyle = 'rgba(255,255,255,0.15)';
+            pCtx.beginPath();
+            pCtx.arc(center, center, radius * 0.85, 0.1 * Math.PI, 0.9 * Math.PI); 
+            pCtx.fill();
+        });
+    }
+
+    resizeCanvas();
+
+    function initBoard() {
+        board = [];
+        for (let i = 0; i < BOARD_SIZE; i++) {
+            board[i] = new Array(BOARD_SIZE).fill(0);
+        }
+    }
+
+    function toggleScanlines() {
+        scanlinesOn = !scanlinesOn;
+        const text = scanlinesOn ? "ON" : "OFF";
+        scanlineStatusTexts.forEach(el => el.textContent = text);
+        
+        if (scanlinesOn) {
+            crtOverlay.classList.remove('hidden');
+            // 移除 no-scanlines 类，恢复模糊和光晕
+            screenContainer.classList.remove('no-scanlines');
+        } else {
+            crtOverlay.classList.add('hidden');
+            // 添加 no-scanlines 类，变清晰
+            screenContainer.classList.add('no-scanlines');
+        }
+    }
+
+    function togglePause() {
+        if (!isPlaying || gameOver) return;
+        
+        isPaused = !isPaused;
+        
+        if (isPaused) {
+            pauseMenu.classList.remove('hidden');
+            screenContainer.style.cursor = 'default';
+        } else {
+            pauseMenu.classList.add('hidden');
+            screenContainer.style.cursor = 'none';
+            draw();
+        }
+    }
+
+    function startGame(diff) {
+        difficulty = diff;
+        difficultyText.textContent = diff.toUpperCase();
+        
+        initBoard();
+        isPlaying = true;
+        isPaused = false;
+        isPlayerTurn = true;
+        gameOver = false;
+        
+        startScreen.classList.add('hidden');
+        gameOverScreen.classList.add('hidden');
+        pauseMenu.classList.add('hidden');
+        hudPanel.classList.remove('invisible');
+        
+        screenContainer.style.cursor = 'none';
+        
+        updateTurnUI();
+        draw();
+    }
+
+    function backToMenu() {
+        gameOverScreen.classList.add('hidden');
+        pauseMenu.classList.add('hidden');
+        startScreen.classList.remove('hidden');
+        hudPanel.classList.add('invisible');
+        screenContainer.style.cursor = 'default';
+        gameOver = false;
+        isPlaying = false;
+        isPaused = false;
+        initBoard(); 
+        draw(); 
+    }
+
+    function updateTurnUI() {
+        if (isPlayerTurn) {
+            turnText.textContent = "PLAYER TURN";
+            turnText.style.color = COLOR_P1;
+            turnDot.classList.remove('ai-turn');
+        } else {
+            turnText.textContent = "CPU THINKING...";
+            turnText.style.color = COLOR_P2;
+            turnDot.classList.add('ai-turn');
+        }
+    }
+
+    // --- 核心交互逻辑 ---
+
+    function handleMouseMove(e) {
+        if (!isPlaying || gameOver || isPaused) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        
+        rawMouseX = (e.clientX - rect.left) * scaleX;
+        rawMouseY = (e.clientY - rect.top) * scaleY;
+
+        if (isPlayerTurn) {
+            const xIndex = Math.round((rawMouseX - BOARD_OFFSET_X) / GRID_SIZE);
+            const yIndex = Math.round((rawMouseY - BOARD_OFFSET_Y) / GRID_SIZE);
+
+            if (xIndex >= 0 && xIndex < BOARD_SIZE && yIndex >= 0 && yIndex < BOARD_SIZE) {
+                mouseGridX = xIndex;
+                mouseGridY = yIndex;
+            } else {
+                mouseGridX = -1;
+                mouseGridY = -1;
+            }
+        } else {
+            mouseGridX = -1;
+            mouseGridY = -1;
+        }
+        
+        draw();
+    }
+
+    function handleClick(e) {
+        if (!isPlaying || !isPlayerTurn || gameOver || isPaused) return;
+
+        if (mouseGridX >= 0 && mouseGridX < BOARD_SIZE && mouseGridY >= 0 && mouseGridY < BOARD_SIZE) {
+            if (board[mouseGridY][mouseGridX] === 0) {
+                placePiece(mouseGridX, mouseGridY, 1);
+                mouseGridX = -1; 
+                mouseGridY = -1;
+            }
+        }
+    }
+
+    function placePiece(x, y, player) {
+        board[y][x] = player;
+        draw();
+        
+        if (checkWin(x, y, player)) {
+            endGame(player);
+            return;
+        }
+
+        if (checkDraw()) {
+            endGame(0);
+            return;
+        }
+
+        isPlayerTurn = !isPlayerTurn;
+        updateTurnUI();
+
+        if (!isPlayerTurn && !gameOver) {
+            setTimeout(aiMove, 500); 
+        }
+    }
+
+    function checkDraw() {
+        for(let y=0; y<BOARD_SIZE; y++) {
+            for(let x=0; x<BOARD_SIZE; x++) {
+                if(board[y][x] === 0) return false;
+            }
+        }
+        return true;
+    }
+
+    function aiMove() {
+        if (gameOver || isPaused) {
+            if(isPaused && !gameOver) {
+                setTimeout(aiMove, 500);
+            }
+            return;
+        }
+
+        try {
+            requestAnimationFrame(() => {
+                let move = getBestMove();
+                if (move) {
+                    placePiece(move.x, move.y, 2);
+                } else {
+                    endGame(0);
+                }
+            });
+        } catch (e) {
+            console.error("AI Error:", e);
+            fallbackRandomMove();
+        }
+    }
+
+    function fallbackRandomMove() {
+        let empty = [];
+        for(let y=0; y<BOARD_SIZE; y++) {
+            for(let x=0; x<BOARD_SIZE; x++) {
+                if(board[y][x] === 0) empty.push({x, y});
+            }
+        }
+        if(empty.length > 0) {
+            let m = empty[Math.floor(Math.random() * empty.length)];
+            placePiece(m.x, m.y, 2);
+        } else {
+            endGame(0);
+        }
+    }
+
+    function getBestMove() {
+        let bestScore = -Infinity;
+        let moves = [];
+
+        for (let y = 0; y < BOARD_SIZE; y++) {
+            for (let x = 0; x < BOARD_SIZE; x++) {
+                if (board[y][x] === 0) {
+                    if (!hasNeighbor(x, y)) continue;
+
+                    let score = evaluatePoint(x, y);
+                    
+                    if (difficulty === 'easy') score += Math.random() * 80;
+                    if (difficulty === 'normal') score += Math.random() * 20;
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        moves = [{x, y}];
+                    } else if (score === bestScore) {
+                        moves.push({x, y});
+                    }
+                }
+            }
+        }
+
+        if (moves.length === 0) {
+             for (let y = 0; y < BOARD_SIZE; y++) {
+                for (let x = 0; x < BOARD_SIZE; x++) {
+                    if (board[y][x] === 0) moves.push({x,y});
+                }
+             }
+             if (moves.length === 0) return null;
+        }
+
+        const index = Math.floor(Math.random() * moves.length);
+        return moves[index];
+    }
+
+    function hasNeighbor(x, y) {
+        const range = 2;
+        const startY = Math.max(0, y - range);
+        const endY = Math.min(BOARD_SIZE - 1, y + range);
+        const startX = Math.max(0, x - range);
+        const endX = Math.min(BOARD_SIZE - 1, x + range);
+
+        for (let ny = startY; ny <= endY; ny++) {
+            for (let nx = startX; nx <= endX; nx++) {
+                if (ny === y && nx === x) continue;
+                if (board[ny][nx] !== 0) return true;
+            }
+        }
+        return false;
+    }
+
+    function evaluatePoint(x, y) {
+        let attackScore = evaluateLines(x, y, 2);
+        let defenseScore = evaluateLines(x, y, 1);
+
+        if (difficulty === 'hard') {
+            if (defenseScore >= 10000) defenseScore *= 1.5; 
+            return attackScore * 1.1 + defenseScore;
+        } else if (difficulty === 'normal') {
+            return attackScore * 1.0 + defenseScore * 0.8;
+        } else {
+            return attackScore + defenseScore * 0.5;
+        }
+    }
+
+    function evaluateLines(x, y, player) {
+        let totalScore = 0;
+        const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+
+        for (let d of directions) {
+            let count = 1;
+            let block = 0;
+            
+            let i = 1;
+            while (true) {
+                let nx = x + d[0] * i;
+                let ny = y + d[1] * i;
+                if (nx < 0 || nx >= BOARD_SIZE || ny < 0 || ny >= BOARD_SIZE) {
+                    block++;
+                    break;
+                }
+                if (board[ny][nx] === player) {
+                    count++;
+                } else if (board[ny][nx] !== 0) {
+                    block++;
+                    break;
+                } else {
+                    break;
+                }
+                i++;
+            }
+
+            i = 1;
+            while (true) {
+                let nx = x - d[0] * i;
+                let ny = y - d[1] * i;
+                if (nx < 0 || nx >= BOARD_SIZE || ny < 0 || ny >= BOARD_SIZE) {
+                    block++;
+                    break;
+                }
+                if (board[ny][nx] === player) {
+                    count++;
+                } else if (board[ny][nx] !== 0) {
+                    block++;
+                    break;
+                } else {
+                    break;
+                }
+                i++;
+            }
+
+            totalScore += getScore(count, block);
+        }
+        return totalScore;
+    }
+
+    function getScore(count, block) {
+        if (count >= 5) return 100000;
+        
+        if (block === 0) {
+            if (count === 4) return 10000;
+            if (count === 3) return 1000;
+            if (count === 2) return 100;
+            if (count === 1) return 10;
+        } else if (block === 1) {
+            if (count === 4) return 1000;
+            if (count === 3) return 100;
+            if (count === 2) return 10;
+        }
+        return 0;
+    }
+
+    function checkWin(x, y, player) {
+        const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+        for (let d of directions) {
+            let count = 1;
+            let i = 1;
+            while (true) {
+                let nx = x + d[0] * i;
+                let ny = y + d[1] * i;
+                if (nx < 0 || nx >= BOARD_SIZE || ny < 0 || ny >= BOARD_SIZE || board[ny][nx] !== player) break;
+                count++;
+                i++;
+            }
+            i = 1;
+            while (true) {
+                let nx = x - d[0] * i;
+                let ny = y - d[1] * i;
+                if (nx < 0 || nx >= BOARD_SIZE || ny < 0 || ny >= BOARD_SIZE || board[ny][nx] !== player) break;
+                count++;
+                i++;
+            }
+            if (count >= 5) return true;
+        }
+        return false;
+    }
+
+    function endGame(winner) {
+        gameOver = true;
+        isPlaying = false; 
+        isPaused = false;
+        
+        screenContainer.style.cursor = 'default';
+
+        if (winner === 1) {
+            winnerText.textContent = "YOU WIN";
+            winnerText.style.color = COLOR_P1;
+            winnerText.style.textShadow = `0 0 20px ${COLOR_P1}`;
+        } else if (winner === 2) {
+            winnerText.textContent = "YOU LOSE";
+            winnerText.style.color = COLOR_P2;
+            winnerText.style.textShadow = `0 0 20px ${COLOR_P2}`;
+        } else {
+            winnerText.textContent = "DRAW";
+            winnerText.style.color = "#ffff33";
+            winnerText.style.textShadow = `0 0 20px #ffff33`;
+        }
+        
+        setTimeout(() => {
+            gameOverScreen.classList.remove('hidden');
+        }, 800);
+    }
+
+    function draw() {
+        // 1. 绘制缓存背景
+        ctx.drawImage(bgCache, 0, 0);
+
+        // 2. 绘制缓存棋子
+        const drawOffset = GRID_SIZE; 
+
+        for (let y = 0; y < BOARD_SIZE; y++) {
+            for (let x = 0; x < BOARD_SIZE; x++) {
+                if (board[y][x] !== 0) {
+                    const cx = BOARD_OFFSET_X + x * GRID_SIZE;
+                    const cy = BOARD_OFFSET_Y + y * GRID_SIZE;
+                    const img = board[y][x] === 1 ? p1Cache : p2Cache;
+                    ctx.drawImage(img, cx - drawOffset, cy - drawOffset);
+                }
+            }
+        }
+        
+        if (isPaused) return;
+
+        // 3. 绘制吸附的幽灵棋子
+        if (mouseGridX !== -1 && mouseGridY !== -1 && board[mouseGridY][mouseGridX] === 0) {
+            drawGhostPiece(mouseGridX, mouseGridY);
+        }
+
+        // 4. 绘制平滑十字光标
+        if (rawMouseX > 0 && rawMouseY > 0) {
+            drawCrosshair(rawMouseX, rawMouseY);
+        }
+    }
+    
+    function drawGhostPiece(x, y) {
+        const cx = BOARD_OFFSET_X + x * GRID_SIZE;
+        const cy = BOARD_OFFSET_Y + y * GRID_SIZE;
+        const radius = GRID_SIZE * 0.42; 
+        
+        ctx.fillStyle = 'rgba(51, 255, 51, 0.3)';
+        ctx.strokeStyle = 'rgba(51, 255, 51, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 0; 
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+    }
+
+    function drawCrosshair(x, y) {
+        ctx.strokeStyle = 'rgba(51, 255, 51, 0.9)';
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 0;
+        const size = 12;
+
+        ctx.beginPath();
+        ctx.moveTo(x - size, y);
+        ctx.lineTo(x + size, y);
+        ctx.moveTo(x, y - size);
+        ctx.lineTo(x, y + size);
+        ctx.stroke();
+    }
+
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mousedown', handleClick);
+
+    window.addEventListener('keydown', (e) => {
+        if (gameOver) {
+            if (e.code === 'Space') {
+                backToMenu();
+            }
+            return;
+        }
+
+        if (isPlaying) {
+            if (e.code === 'Escape') {
+                togglePause();
+            }
+            if (isPaused) {
+                if (e.key === 's' || e.key === 'S') toggleScanlines();
+                if (e.key === 'q' || e.key === 'Q') backToMenu();
+            }
+            return; 
+        }
+
+        if (!isPlaying) {
+            if (e.key === '1') startGame('easy');
+            if (e.key === '2') startGame('normal');
+            if (e.key === '3') startGame('hard');
+            if (e.key === 's' || e.key === 'S') toggleScanlines(); 
+        }
+    });
+
+    initBoard();
+    draw();
+
+</script>
+</body>
+</html>
